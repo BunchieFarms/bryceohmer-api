@@ -9,20 +9,40 @@ const mongoUri = process.env.MONGO_URI;
 const client = new MongoClient(mongoUri);
 const dbName = 'bryceohmer';
 
-app.get('/api/currentWeather', (req, res) => {
-    client.connect()
-        .then((cl) => {
-            const db = cl.db(dbName);
-            const collection = db.collection('currentWeather');
-            collection.find({}).limit(1).sort({_id: -1}).toArray()
-                .then((data) => res.send(data));
-        });
+app.get('/api/currentWeather', async (req, res) => {
+    const doc = await getFirstInCollection('currentWeather');
+    res.send(doc);
 });
+
+app.get('/api/weatherForecast', async (req, res) => {
+    const doc = await getFirstInCollection('weatherForecast');
+    res.send(doc);
+});
+
+app.get('/api/weatherHistory', async (req, res) => {
+    const doc = await getFirstInCollection('weatherHistory');
+    res.send(doc);
+})
+
+app.get('/api/weatherHistory', (req, res) => {
+    client.connect()
+})
+
+async function getFirstInCollection(coll) {
+    await client.connect();
+
+    const database = client.db(dbName);
+    const collection = database.collection(coll);
+
+    const found = collection.find({}).limit(1).sort({ _id: -1 }).toArray();
+
+    return found;
+}
 
 // For testing
 // cron.schedule(`*/2 * * * * *`, () => {
 //     console.log('doing the dang thang')
-//     saveHistorical()
+//     saveForecast()
 // })
 
 //Fetch current weather every hour
@@ -75,9 +95,9 @@ function saveForecast() {
     fetch(`https://api.openweathermap.org/data/2.5/onecall?lat=33.9357466&lon=-78.0546333&exclude=minutely,hourly,current,alerts&appid=${process.env.WEATHER_KEY}`)
         .then((res) => res.json())
         .then((data => {
-            data.daily.forEach((w) => {
-                w.weather[0].iconUrl = `http://openweathermap.org/img/wn/${data.weather[0].icon}@4x.png`
-            });
+            // data.daily.forEach((w) => {
+            //     w.weather[0].iconUrl = `http://openweathermap.org/img/wn/${data.weather[0].icon}@4x.png`
+            // });
 
             client.connect()
                 .then((cl) => {
@@ -85,7 +105,7 @@ function saveForecast() {
                     const collection = db.collection('weatherForecast');
                     collection.insertOne(data);
                 });
-        }))
+        }));
 }
 
 app.listen(3001, () => {
