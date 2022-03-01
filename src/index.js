@@ -38,8 +38,8 @@ async function getFirstInCollection(coll) {
 //     saveForecast()
 // })
 
-//Fetch current weather every hour
-cron.schedule(`0 * * * *`, () => {
+//Fetch current weather every half hour
+cron.schedule(`*/30 * * * *`, () => {
     saveCurrentWeather();
 });
 
