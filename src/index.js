@@ -43,10 +43,11 @@ cron.schedule(`*/30 * * * *`, () => {
     saveCurrentWeather();
 });
 
-//Fetch forecast and historical once a day at 8am
+//Fetch forecast and historical, delete old records once a day at 8am
 cron.schedule(`0 8 * * *`, () => {
     saveForecast();
-    // saveHistorical();
+    deleteOldForecast();
+    deleteOldHistorical();
 });
 
 function saveCurrentWeather() {
@@ -103,6 +104,24 @@ function saveForecast() {
                             collection.insertOne(data);
                         });
                 });
+        });
+}
+
+function deleteOldHistorical() {
+    client.connect()
+        then((cl) => {
+            const db = cl.db(dbName);
+            const collection = db.collection('currentWeather');
+            collection.deleteMany({dt: {"$lt": new Date(Date.now() - 604800000).getTime() / 1000}});
+        });
+}
+
+function deleteOldForecast() {
+    client.connect()
+        .then((cl) => {
+            const db = cl.db(dbName);
+            const collection = db.collection('weatherForecast');
+            collection.deleteMany({ "daily.dt": {"$lt": new Date(Date.now() - 86400000).getTime() / 1000} });
         });
 }
 
