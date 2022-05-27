@@ -49,11 +49,15 @@ cron.schedule(`*/30 * * * *`, () => {
     createHistorical();
 });
 
-//Fetch forecast and historical, delete old records once a day at 8am
-cron.schedule(`0 8 * * *`, () => {
-    saveForecast();
+//Delete old records once a day at midnight
+cron.schedule(`0 0 * * *`, () => {
     deleteOldForecast();
     deleteOldCurrentWeather();
+});
+
+//Fetch forecast every hour
+cron.schedule(`0 * * * *`, () => {
+    saveForecast();
 });
 
 function saveCurrentWeather() {
@@ -122,7 +126,6 @@ function saveHistorical(rainData) {
             const collection = db.collection("pastWeather");
             collection.findOne({date: rainData.date})
                 .then((found) => {
-                    console.log(found)
                     if (found) {
                         collection.updateOne({_id: found._id}, {$set: {cumRain: rainData.cumRain}});
                     } else {
