@@ -19,6 +19,10 @@ app.get('/api/weatherForecast', async (req, res) => {
     res.send(doc[0]);
 });
 
+app.get('/api/pastWeather', async (req, res) => {
+    const doc = await getFirstInCollection('pastWeather');
+});
+
 // app.get('/api/weatherHistory', async (req, res) => {
 //     const doc = await getFirstInCollection('weatherHistory');
 //     res.send(doc[0]);
@@ -35,19 +39,20 @@ async function getFirstInCollection(coll) {
 // For testing
 // cron.schedule(`*/5 * * * * *`, () => {
 //     console.log('doin the dang thang')
-//     saveForecast()
+//     createHistorical();
 // })
 
 //Fetch current weather every half hour
 cron.schedule(`*/30 * * * *`, () => {
     saveCurrentWeather();
+    createHistorical();
 });
 
 //Fetch forecast and historical, delete old records once a day at 8am
 cron.schedule(`0 8 * * *`, () => {
     saveForecast();
     deleteOldForecast();
-    deleteOldHistorical();
+    deleteOldCurrentWeather();
 });
 
 function saveCurrentWeather() {
@@ -65,25 +70,6 @@ function saveCurrentWeather() {
                 });
         });
 }
-
-// function saveHistorical() {
-//     client.connect()
-//         .then((cl) => {
-//             const db = cl.db(dbName);
-//             const collection = db.collection('currentWeather');
-//             collection.findOne({ zip: 28461 })
-//                 .then((found) => {
-//                     fetch(`http://api.openweathermap.org/data/2.5/onecall/timemachine?lat=${found.coord.lat}&lon=${found.coord.lon}&dt=${Math.floor(new Date().getTime() / 1000) - 43200}&appid=${process.env.WEATHER_KEY}`)
-//                         .then((res) => res.json())
-//                         .then((data) => {
-//                             data.zip = 28461;
-
-//                             const collection = db.collection('weatherHistory');
-//                             collection.insertOne(data);
-//                         });
-//                 });
-//         });
-// }
 
 function saveForecast() {
     client.connect()
@@ -107,7 +93,45 @@ function saveForecast() {
         });
 }
 
-function deleteOldHistorical() {
+function createHistorical() {
+    client.connect()
+        .then((cl) => {
+            const db = cl.db(dbName);
+            const collection = db.collection('currentWeather');
+            const dayStart = new Date().setHours(0,0,0,0) / 1000;
+            const dayEnd = new Date().setHours(23,59,59,999) / 1000;
+            const zip = 28461;
+            let cumRain = 0;
+            collection.find({dt: {"$gte": dayStart, "$lte": dayEnd}, zip: zip}).toArray()
+                .then((found) => {
+                    found.forEach((item) => {
+                        if (item.rain !== undefined) {
+                            cumRain += item.rain["1h"];
+                        };
+                    });
+                    saveHistorical({date: dayStart, zip: zip, cumRain: cumRain});
+                });
+        });
+}
+
+function saveHistorical(rainData) {
+    client.connect()
+        .then((cl) => {
+            const db = cl.db(dbName);
+            const collection = db.collection("pastWeather");
+            collection.findOne({date: rainData.date})
+                .then((found) => {
+                    console.log(found)
+                    if (found) {
+                        collection.updateOne({_id: found._id}, {$set: {cumRain: rainData.cumRain}});
+                    } else {
+                        collection.insertOne(rainData);
+                    }
+                });
+        });
+}
+
+function deleteOldCurrentWeather() {
     client.connect()
         then((cl) => {
             const db = cl.db(dbName);
