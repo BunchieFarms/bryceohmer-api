@@ -10,37 +10,32 @@ const client = new MongoClient(mongoUri);
 const dbName = 'bryceohmer';
 
 app.get('/api/currentWeather', async (req, res) => {
-    const doc = await getFirstInCollection('currentWeather');
+    const doc = await getItemsInCollection('currentWeather', 1, -1);
     res.send(doc[0]);
 });
 
 app.get('/api/weatherForecast', async (req, res) => {
-    const doc = await getFirstInCollection('weatherForecast');
+    const doc = await getItemsInCollection('weatherForecast', 1, -1);
     res.send(doc[0]);
 });
 
 app.get('/api/pastWeather', async (req, res) => {
-    const doc = await getFirstInCollection('pastWeather');
-    res.send(doc[0]);
+    const doc = await getItemsInCollection('pastWeather', 8, 1);
+    res.send(doc);
 });
 
-// app.get('/api/weatherHistory', async (req, res) => {
-//     const doc = await getFirstInCollection('weatherHistory');
-//     res.send(doc[0]);
-// });
-
-async function getFirstInCollection(coll) {
+async function getItemsInCollection(coll, limit, direction) {
     await client.connect();
     const database = client.db(dbName);
     const collection = database.collection(coll);
-    const found = collection.find({}).limit(1).sort({ _id: -1 }).toArray();
+    const found = collection.find({}).limit(limit).sort({ _id: direction }).toArray();
     return found;
 }
 
 // For testing
 // cron.schedule(`*/5 * * * * *`, () => {
 //     console.log('doin the dang thang')
-//     createHistorical();
+//     createWeekOfHistory();
 // })
 
 //Fetch current weather every half hour
@@ -53,6 +48,7 @@ cron.schedule(`*/30 * * * *`, () => {
 cron.schedule(`0 0 * * *`, () => {
     deleteOldForecast();
     deleteOldCurrentWeather();
+    deleteOldPastWeather();
 });
 
 //Fetch forecast every hour
@@ -103,31 +99,64 @@ function createHistorical() {
         .then((cl) => {
             const db = cl.db(dbName);
             const collection = db.collection('currentWeather');
-            const dayStart = new Date().setHours(0,0,0,0) / 1000;
-            const dayEnd = new Date().setHours(23,59,59,999) / 1000;
+            const dayStart = new Date().setHours(0, 0, 0, 0) / 1000;
+            const dayEnd = new Date().setHours(23, 59, 59, 999) / 1000;
             const zip = 28461;
             let cumRain = 0;
-            collection.find({dt: {"$gte": dayStart, "$lte": dayEnd}, zip: zip}).toArray()
+            collection.find({ dt: { "$gte": dayStart, "$lte": dayEnd }, zip: zip }).toArray()
                 .then((found) => {
+                    let topIcon = 1;
                     found.forEach((item) => {
+                        const currIcon = parseInt(item.weather[0].icon);
+                        topIcon = currIcon > topIcon ? currIcon : topIcon;
                         if (item.rain !== undefined) {
                             cumRain += item.rain["1h"];
                         };
                     });
-                    saveHistorical({date: dayStart, zip: zip, cumRain: cumRain});
+                    const iconUrlCode = topIcon < 10 ? `0${topIcon}d` : `${topIcon}d`;
+                    saveHistorical({ date: dayStart, zip: zip, cumRain: cumRain, iconUrl: `http://openweathermap.org/img/wn/${iconUrlCode}@4x.png` });
                 });
         });
 }
+
+// function createWeekOfHistory() {
+//     client.connect()
+//         .then((cl) => {
+//             const db = cl.db(dbName);
+//             const collection = db.collection('currentWeather');
+//             const dayStart = new Date().setHours(0, 0, 0, 0) / 1000;
+//             const dayEnd = new Date().setHours(23, 59, 59, 999) / 1000;
+//             const zip = 28461;
+//             for (let i = 1; i < 8; i++) {
+//                 const pastDayStart = new Date(dayStart * 1000).setDate(new Date(dayStart * 1000).getDate() - i) / 1000;
+//                 const pastDayEnd = new Date(dayEnd * 1000).setDate(new Date(dayEnd * 1000).getDate() - i) / 1000;
+//                 let cumRain = 0;
+//                 collection.find({ dt: { "$gte": pastDayStart, "$lte": pastDayEnd }, zip: zip }).toArray()
+//                     .then((found) => {
+//                         let topIcon = 1;
+//                         found.forEach((item) => {
+//                             const currIcon = parseInt(item.weather[0].icon);
+//                             topIcon = currIcon > topIcon ? currIcon : topIcon;
+//                             if (item.rain !== undefined) {
+//                                 cumRain += item.rain["1h"];
+//                             };
+//                         });
+//                         const iconUrlCode = topIcon < 10 ? `0${topIcon}d` : `${topIcon}d`;
+//                         saveHistorical({ date: pastDayStart, zip: zip, cumRain: cumRain, iconUrl: `http://openweathermap.org/img/wn/${iconUrlCode}@4x.png` });
+//                     });
+//             }
+//         });
+// }
 
 function saveHistorical(rainData) {
     client.connect()
         .then((cl) => {
             const db = cl.db(dbName);
             const collection = db.collection("pastWeather");
-            collection.findOne({date: rainData.date})
+            collection.findOne({ date: rainData.date })
                 .then((found) => {
                     if (found) {
-                        collection.updateOne({_id: found._id}, {$set: {cumRain: rainData.cumRain}});
+                        collection.updateOne({ _id: found._id }, { $set: { cumRain: rainData.cumRain } });
                     } else {
                         collection.insertOne(rainData);
                     }
@@ -137,10 +166,10 @@ function saveHistorical(rainData) {
 
 function deleteOldCurrentWeather() {
     client.connect()
-        then((cl) => {
+        .then((cl) => {
             const db = cl.db(dbName);
             const collection = db.collection('currentWeather');
-            collection.deleteMany({dt: {"$lt": new Date(Date.now() - 604800000).getTime() / 1000}});
+            collection.deleteMany({ dt: { "$lt": new Date(Date.now() - 604800000).getTime() / 1000 } });
         });
 }
 
@@ -149,7 +178,18 @@ function deleteOldForecast() {
         .then((cl) => {
             const db = cl.db(dbName);
             const collection = db.collection('weatherForecast');
-            collection.deleteMany({ "daily.dt": {"$lt": new Date(Date.now() - 86400000).getTime() / 1000} });
+            collection.deleteMany({ "daily.dt": { "$lt": new Date(Date.now() - 86400000).getTime() / 1000 } });
+        });
+}
+
+function deleteOldPastWeather() {
+    const midnightToday = new Date().setHours(0, 0, 0, 0) / 1000;
+    const aWeekAgo = new Date(midnightToday * 1000).setDate(new Date(midnightToday * 1000).getDate() - 7) / 1000;
+    client.connect()
+        .then((cl) => {
+            const db = cl.db(dbName);
+            const collection = db.collection('pastWeather');
+            collection.deleteMany({ date: { "$lt": aWeekAgo } })
         });
 }
 
