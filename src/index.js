@@ -21,6 +21,7 @@ app.get('/api/weatherForecast', async (req, res) => {
 
 app.get('/api/pastWeather', async (req, res) => {
     const doc = await getFirstInCollection('pastWeather');
+    res.send(doc[0]);
 });
 
 // app.get('/api/weatherHistory', async (req, res) => {
