@@ -9,18 +9,28 @@ const mongoUri = process.env.MONGO_URI;
 const client = new MongoClient(mongoUri);
 const dbName = 'bryceohmer';
 
+const zipCodes = [
+    { city: 'Winnabow', zip: 28479, trails: ['Brunswick Nature Park'] },
+    { city: 'Castle Hayne', zip: 28429, trails: ['Blue Clay'] },
+    { city: 'Elizabethtown', zip: 28337, trails: ['Brown\'s Creek'] }
+]
+
+app.get('/api/locations', async (req, res) => {
+    res.send(zipCodes)
+})
+
 app.get('/api/currentWeather', async (req, res) => {
-    const doc = await getItemsInCollection('currentWeather', 1, -1);
-    res.send(doc[0]);
+    const doc = await getItemsInCollection('currentWeather', 3, -1);
+    res.send(doc);
 });
 
 app.get('/api/weatherForecast', async (req, res) => {
-    const doc = await getItemsInCollection('weatherForecast', 1, -1);
-    res.send(doc[0]);
+    const doc = await getItemsInCollection('weatherForecast', 3, -1);
+    res.send(doc);
 });
 
 app.get('/api/pastWeather', async (req, res) => {
-    const doc = await getItemsInCollection('pastWeather', 8, 1);
+    const doc = await getItemsInCollection('pastWeather', 30, 1);
     res.send(doc);
 });
 
@@ -35,7 +45,9 @@ async function getItemsInCollection(coll, limit, direction) {
 // For testing
 // cron.schedule(`*/5 * * * * *`, () => {
 //     console.log('doin the dang thang')
-//     createWeekOfHistory();
+//     // createWeekOfHistory();
+//     // saveCurrentWeather();
+//     // saveForecast();
 // })
 
 //Fetch current weather every half hour
@@ -57,19 +69,24 @@ cron.schedule(`0 * * * *`, () => {
 });
 
 function saveCurrentWeather() {
-    fetch(`http://api.openweathermap.org/data/2.5/weather?zip=28461&appid=${process.env.WEATHER_KEY}`)
-        .then((res) => res.json())
-        .then((data) => {
-            data.weather[0].iconUrl = `http://openweathermap.org/img/wn/${data.weather[0].icon}@4x.png`;
-            data.zip = 28461;
+    zipCodes.forEach((zip) => {
+        fetch(`http://api.openweathermap.org/data/2.5/weather?zip=${zip.zip}&appid=${process.env.WEATHER_KEY}`)
+            .then((res) => res.json())
+            .then((data) => {
+                data.weather[0].iconUrl = `http://openweathermap.org/img/wn/${data.weather[0].icon}@4x.png`;
+                data.zip = zip.zip;
+                data.cities = zip.city;
+                data.trails = zip.trails;
 
-            client.connect()
-                .then((cl) => {
-                    const db = cl.db(dbName);
-                    const collection = db.collection('currentWeather');
-                    collection.insertOne(data);
-                });
-        });
+                client.connect()
+                    .then((cl) => {
+                        const db = cl.db(dbName);
+                        const collection = db.collection('currentWeather');
+                        collection.insertOne(data);
+                    });
+            });
+    })
+
 }
 
 function saveForecast() {
@@ -77,20 +94,23 @@ function saveForecast() {
         .then((cl) => {
             const db = cl.db(dbName);
             const collection = db.collection('currentWeather');
-            collection.findOne({ zip: 28461 })
-                .then((found) => {
-                    fetch(`https://api.openweathermap.org/data/2.5/onecall?lat=${found.coord.lat}&lon=${found.coord.lon}&exclude=minutely,hourly,current,alerts&appid=${process.env.WEATHER_KEY}`)
-                        .then((res) => res.json())
-                        .then((data) => {
-                            data.zip = 28461;
-                            data.daily.forEach((w) => {
-                                w.weather[0].iconUrl = `http://openweathermap.org/img/wn/${w.weather[0].icon}@4x.png`
-                            });
+            zipCodes.forEach((zip) => {
+                collection.findOne({ zip: zip.zip })
+                    .then((found) => {
+                        fetch(`https://api.openweathermap.org/data/2.5/onecall?lat=${found.coord.lat}&lon=${found.coord.lon}&exclude=minutely,hourly,current,alerts&appid=${process.env.WEATHER_KEY}`)
+                            .then((res) => res.json())
+                            .then((data) => {
+                                data.zip = zip.zip;
+                                data.daily.forEach((w) => {
+                                    w.weather[0].iconUrl = `http://openweathermap.org/img/wn/${w.weather[0].icon}@4x.png`
+                                });
 
-                            const collection = db.collection('weatherForecast');
-                            collection.insertOne(data);
-                        });
-                });
+                                const collection = db.collection('weatherForecast');
+                                collection.insertOne(data);
+                            });
+                    });
+            })
+
         });
 }
 
@@ -101,21 +121,23 @@ function createHistorical() {
             const collection = db.collection('currentWeather');
             const dayStart = new Date().setHours(0, 0, 0, 0) / 1000;
             const dayEnd = new Date().setHours(23, 59, 59, 999) / 1000;
-            const zip = 28461;
-            let cumRain = 0;
-            collection.find({ dt: { "$gte": dayStart, "$lte": dayEnd }, zip: zip }).toArray()
-                .then((found) => {
-                    let topIcon = 1;
-                    found.forEach((item) => {
-                        const currIcon = parseInt(item.weather[0].icon);
-                        topIcon = currIcon > topIcon ? currIcon : topIcon;
-                        if (item.rain !== undefined) {
-                            cumRain += item.rain["1h"];
-                        };
+            zipCodes.forEach((zip) => {
+                let cumRain = 0;
+                collection.find({ dt: { "$gte": dayStart, "$lte": dayEnd }, zip: zip.zip }).toArray()
+                    .then((found) => {
+                        let topIcon = 1;
+                        found.forEach((item) => {
+                            const currIcon = parseInt(item.weather[0].icon);
+                            topIcon = currIcon > topIcon ? currIcon : topIcon;
+                            if (item.rain !== undefined) {
+                                cumRain += item.rain["1h"];
+                            };
+                        });
+                        const iconUrlCode = topIcon < 10 ? `0${topIcon}d` : `${topIcon}d`;
+                        saveHistorical({ date: dayStart, zip: zip.zip, cumRain: cumRain, iconUrl: `http://openweathermap.org/img/wn/${iconUrlCode}@4x.png` });
                     });
-                    const iconUrlCode = topIcon < 10 ? `0${topIcon}d` : `${topIcon}d`;
-                    saveHistorical({ date: dayStart, zip: zip, cumRain: cumRain, iconUrl: `http://openweathermap.org/img/wn/${iconUrlCode}@4x.png` });
-                });
+            })
+
         });
 }
 
@@ -126,25 +148,27 @@ function createHistorical() {
 //             const collection = db.collection('currentWeather');
 //             const dayStart = new Date().setHours(0, 0, 0, 0) / 1000;
 //             const dayEnd = new Date().setHours(23, 59, 59, 999) / 1000;
-//             const zip = 28461;
-//             for (let i = 1; i < 8; i++) {
-//                 const pastDayStart = new Date(dayStart * 1000).setDate(new Date(dayStart * 1000).getDate() - i) / 1000;
-//                 const pastDayEnd = new Date(dayEnd * 1000).setDate(new Date(dayEnd * 1000).getDate() - i) / 1000;
-//                 let cumRain = 0;
-//                 collection.find({ dt: { "$gte": pastDayStart, "$lte": pastDayEnd }, zip: zip }).toArray()
-//                     .then((found) => {
-//                         let topIcon = 1;
-//                         found.forEach((item) => {
-//                             const currIcon = parseInt(item.weather[0].icon);
-//                             topIcon = currIcon > topIcon ? currIcon : topIcon;
-//                             if (item.rain !== undefined) {
-//                                 cumRain += item.rain["1h"];
-//                             };
+//             zipCodes.forEach((zip) => {
+//                 for (let i = 1; i < 8; i++) {
+//                     const pastDayStart = new Date(dayStart * 1000).setDate(new Date(dayStart * 1000).getDate() - i) / 1000;
+//                     const pastDayEnd = new Date(dayEnd * 1000).setDate(new Date(dayEnd * 1000).getDate() - i) / 1000;
+//                     let cumRain = 0;
+//                     collection.find({ dt: { "$gte": pastDayStart, "$lte": pastDayEnd }, zip: zip.zip }).toArray()
+//                         .then((found) => {
+//                             let topIcon = 1;
+//                             found.forEach((item) => {
+//                                 const currIcon = parseInt(item.weather[0].icon);
+//                                 topIcon = currIcon > topIcon ? currIcon : topIcon;
+//                                 if (item.rain !== undefined) {
+//                                     cumRain += item.rain["1h"];
+//                                 };
+//                             });
+//                             const iconUrlCode = topIcon < 10 ? `0${topIcon}d` : `${topIcon}d`;
+//                             saveHistorical({ date: pastDayStart, zip: zip.zip, cumRain: cumRain, iconUrl: `http://openweathermap.org/img/wn/${iconUrlCode}@4x.png` });
 //                         });
-//                         const iconUrlCode = topIcon < 10 ? `0${topIcon}d` : `${topIcon}d`;
-//                         saveHistorical({ date: pastDayStart, zip: zip, cumRain: cumRain, iconUrl: `http://openweathermap.org/img/wn/${iconUrlCode}@4x.png` });
-//                     });
-//             }
+//                 }
+//             })
+
 //         });
 // }
 
